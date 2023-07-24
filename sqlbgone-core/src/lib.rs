@@ -134,6 +134,26 @@ pub fn get_query(def: &DBDefinition, query: &str) -> Option<(Vec<DataType>, Vec<
             }
             _ => todo!(),
         },
+        sqlparser::ast::Statement::Insert {
+            table_name,
+            columns,
+            source,
+            ..
+        } => {
+            if let sqlparser::ast::SetExpr::Values(v) = *source.body.clone() {
+                for (col, val) in columns.iter().zip(v.rows[0].iter()) {
+                    if check_for_placeholer(val) {
+                        in_types.push(
+                            def.get(&table_name.0.get(0).unwrap().value)
+                                .expect("no table?")
+                                .get(&col.value)
+                                .expect("no column?")
+                                .clone(),
+                        );
+                    }
+                }
+            }
+        }
         _ => todo!(),
     }
     Some((in_types, out_types))

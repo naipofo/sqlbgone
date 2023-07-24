@@ -67,11 +67,7 @@ fn main() {
     let definition = sqlbgone_core::get_definition(preface).unwrap();
     println!("{:?}", definition);
 
-    let query = "SELECT package.u_id, size_id, user_id
-    FROM package
-    RIGHT JOIN recipient_package
-    ON package.u_id = recipient_package.package_uid
-    WHERE user_id = ?";
+    let query = "INSERT INTO recipient_package(user_id, package_uid) VALUES (?,?)";
     let query_types = sqlbgone_core::get_query(&definition, query);
     println!("{:?}", query_types);
 }
