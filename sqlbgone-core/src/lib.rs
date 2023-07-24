@@ -27,7 +27,7 @@ fn to_datatype(e: sqlparser::ast::ColumnDef) -> DataType {
     }
 }
 
-fn check_for_placeholer(e: Expr) -> bool {
+fn check_for_placeholer(e: &Expr) -> bool {
     match e {
         Expr::Value(e) => match e {
             sqlparser::ast::Value::Placeholder(_) => true,
@@ -66,33 +66,36 @@ pub fn get_query(def: &DBDefinition, query: &str) -> Option<(Vec<DataType>, Vec<
             sqlparser::ast::SetExpr::Select(s) => {
                 println!("\n\n\n{:#?}, ", (&s.from, &s.projection, &s.selection));
                 fn find_type(
-                    iden: &str,
+                    iden: &Expr,
                     table: &TableWithJoins,
                     def: DBDefinition,
                 ) -> Option<DataType> {
-                    Some(match &table.relation {
-                        sqlparser::ast::TableFactor::Table { name, .. } => {
-                            let name = name.0.get(0)?.to_string();
-                            def.get(&name)?.get(iden)?.clone()
+                    Some(match iden {
+                        Expr::Identifier(e) => table
+                            .joins
+                            .iter()
+                            .map(|j| &j.relation)
+                            .chain([&table.relation])
+                            .find_map(|table| match table {
+                                sqlparser::ast::TableFactor::Table { name, .. } => {
+                                    def.get(&name.0.get(0)?.value)?.get(&e.value)
+                                }
+                                _ => None,
+                            })
+                            .expect("no table?")
+                            .clone(), // TODO: ok only if one value matches
+                        Expr::CompoundIdentifier(e) => {
+                            def.get(&e.get(0)?.value)?.get(&e.get(1)?.value)?.clone()
                         }
                         _ => todo!(),
                     })
                 }
                 for pro in s.projection {
                     match pro {
-                        sqlparser::ast::SelectItem::UnnamedExpr(expr) => match expr {
-                            sqlparser::ast::Expr::Identifier(expr_iden) => {
-                                out_types.push(
-                                    find_type(
-                                        &expr_iden.to_string(),
-                                        s.from.get(0).expect("no table?"),
-                                        def.clone(),
-                                    )
-                                    .expect("type not found"),
-                                );
-                            }
-                            _ => todo!(),
-                        },
+                        sqlparser::ast::SelectItem::UnnamedExpr(expr) => out_types.push(
+                            find_type(&expr, s.from.get(0).expect("no table?"), def.clone())
+                                .expect("type not found"),
+                        ),
                         sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
                             todo!()
                         }
@@ -103,29 +106,26 @@ pub fn get_query(def: &DBDefinition, query: &str) -> Option<(Vec<DataType>, Vec<
 
                 if let Some(selection) = s.selection {
                     match selection {
-                        sqlparser::ast::Expr::BinaryOp { left, op, right } => {
-                            if let Expr::Identifier(iden) = *left {
-                                if check_for_placeholer(*right) {
-                                    in_types.push(
-                                        find_type(
-                                            &iden.to_string(),
-                                            s.from.get(0).expect("no table?"),
-                                            def.clone(),
-                                        )
-                                        .expect("type not found"),
-                                    );
-                                }
-                            } else if let Expr::Identifier(iden) = *right {
-                                if check_for_placeholer(*left) {
-                                    in_types.push(
-                                        find_type(
-                                            &iden.to_string(),
-                                            s.from.get(0).expect("no table?"),
-                                            def.clone(),
-                                        )
-                                        .expect("type not found"),
-                                    );
-                                }
+                        sqlparser::ast::Expr::BinaryOp { left, right, .. } => {
+                            if check_for_placeholer(&right) {
+                                in_types.push(
+                                    find_type(
+                                        &left,
+                                        s.from.get(0).expect("no table?"),
+                                        def.clone(),
+                                    )
+                                    .expect("type not found"),
+                                );
+                            }
+                            if check_for_placeholer(&left) {
+                                in_types.push(
+                                    find_type(
+                                        &right,
+                                        s.from.get(0).expect("no table?"),
+                                        def.clone(),
+                                    )
+                                    .expect("type not found"),
+                                );
                             }
                         }
                         _ => todo!(),
